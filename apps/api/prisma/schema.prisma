@@ -52,7 +52,7 @@ model Task {
   estimatedMin Int?      @default(45)
   dueDate      DateTime?
   scheduledAt  DateTime?
-  tags         String?   @default("[]") // JSON string array of tags e.g. ["DSA", "React"]
+  tags         String?   @default("[]")
   sourceType   String?   @default("MANUAL") // MANUAL, MOCK_INTERVIEW, AI_PLANNER, SKILL_GAP
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -70,7 +70,7 @@ model Document {
   rawText     String
   fileUrl     String?
   fileSize    Int?
-  metadata    String?         // JSON string with parsed skills, experience, company, requirements
+  metadata    String?
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
@@ -84,7 +84,7 @@ model DocumentChunk {
   documentId String
   content    String
   chunkIndex Int
-  embedding  String?  // JSON string array of floats for vector search
+  embedding  String?
   createdAt  DateTime @default(now())
 
   document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
@@ -98,11 +98,11 @@ model JobApplication {
   role               String
   jobUrl             String?
   jobDescriptionText String?
-  status             String    @default("WISHLIST") // WISHLIST, APPLIED, OA, TECHNICAL, HR, OFFER, REJECTED
+  status             String    @default("WISHLIST")
   appliedDate        DateTime?
   interviewDate      DateTime?
-  matchScore         Int?      @default(0) // 0-100% computed by Career Agent
-  analysis           String?   // JSON string with matching skills, missing skills, advice
+  matchScore         Int?      @default(0)
+  analysis           String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -116,11 +116,16 @@ model InterviewSession {
   userId          String
   title           String
   roleType        String              // FRONTEND, BACKEND, FULLSTACK, SYSTEM_DESIGN, HR
+  persona         String              @default("ALEX") // ALEX, MAYA, DANIEL
   status          String              @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED, ABANDONED
   overallScore    Int?
-  scores          String?             // JSON string: { technical: 80, communication: 75, problemSolving: 85, confidence: 70 }
+  scores          String?             // JSON: { technical: 80, communication: 75, problemSolving: 85, relevance: 82, confidence: 70 }
   feedbackSummary String?
-  weakAreas       String?             // JSON string array of extracted weak topics
+  coachingAdvice  String?
+  weakAreas       String?             // JSON array of weak areas
+  strongAreas     String?             // JSON array of strong areas
+  interviewMemory String?             @default("{}") // JSON state tracking claims, topics, callbacks
+  targetJobTitle  String?
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
@@ -137,6 +142,7 @@ model InterviewExchange {
   message     String
   critique    String?
   score       Int?
+  isCallback  Boolean          @default(false)
   createdAt   DateTime         @default(now())
 
   interview   InterviewSession @relation(fields: [interviewId], references: [id], onDelete: Cascade)
@@ -146,8 +152,8 @@ model UserSkill {
   id        String   @id @default(uuid())
   userId    String
   name      String
-  category  String   // LANGUAGE, FRAMEWORK, DATABASE, TOOL, CONCEPT
-  level     String   @default("INTERMEDIATE") // BEGINNER, INTERMEDIATE, ADVANCED, EXPERT
+  category  String
+  level     String   @default("INTERMEDIATE")
   verified  Boolean  @default(false)
   updatedAt DateTime @updatedAt
 

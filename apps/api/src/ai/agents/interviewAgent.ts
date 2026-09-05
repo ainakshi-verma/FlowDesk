@@ -1,10 +1,49 @@
 import { llm } from '../llm';
 
+export type InterviewerPersona = 'ALEX' | 'MAYA' | 'DANIEL';
+
+export interface PersonaConfig {
+  name: string;
+  tagline: string;
+  styleDescription: string;
+  ttsRate: number;
+  ttsPitch: number;
+  tonePrompt: string;
+}
+
+export const PERSONA_CONFIGS: Record<InterviewerPersona, PersonaConfig> = {
+  ALEX: {
+    name: 'Alex',
+    tagline: 'Calm • Technical • Encouraging',
+    styleDescription: 'Focuses on deep conceptual understanding, offers supportive prompts if answers are incomplete, and encourages architectural reasoning.',
+    ttsRate: 0.95,
+    ttsPitch: 1.0,
+    tonePrompt: 'You are Alex, an encouraging and thoughtful Principal Engineer. Your tone is supportive, constructive, and warm, but technically rigorous. If the candidate gives an incomplete answer, nudge them in the right direction.'
+  },
+  MAYA: {
+    name: 'Maya',
+    tagline: 'Professional • Fast-Paced • Challenging',
+    styleDescription: 'Values conciseness, structured communication, and high-scale production systems. Probes for operational reliability and real-world trade-offs.',
+    ttsRate: 1.05,
+    ttsPitch: 1.05,
+    tonePrompt: 'You are Maya, a Staff Engineer at a hyper-growth tech firm. You are brisk, highly professional, and direct. You value concise, high-signal answers and push the candidate on scalability, latency, and edge cases.'
+  },
+  DANIEL: {
+    name: 'Daniel',
+    tagline: 'Strict • Follow-Up Heavy • FAANG-Style',
+    styleDescription: 'High bar, relentless follow-up probing, challenges vague claims, and insists on exact time/space complexities and failure modes.',
+    ttsRate: 0.95,
+    ttsPitch: 0.9,
+    tonePrompt: 'You are Daniel, a Bar Raiser at a FAANG company. You have an exacting standard. You do not let vague hand-waving pass. If the candidate misses an edge case or fails to explain underlying mechanics, challenge them directly.'
+  }
+};
+
 export interface TurnEvaluation {
   critique: string;
   score: number; // 0-100
   followUpOrNextQuestion: string;
-  isFollowUp: boolean;
+  isCallback: boolean;
+  extractedClaims: string[];
 }
 
 export interface FinalInterviewEvaluation {
@@ -13,9 +52,12 @@ export interface FinalInterviewEvaluation {
     technical: number;
     communication: number;
     problemSolving: number;
+    relevance: number;
     confidence: number;
   };
   feedbackSummary: string;
+  coachingAdvice: string;
+  strongAreas: string[];
   weakAreas: string[];
   remediationTasks: Array<{
     title: string;
@@ -26,130 +68,219 @@ export interface FinalInterviewEvaluation {
 }
 
 export class InterviewAgent {
-  async getInitialQuestion(roleType: string, customTopic?: string): Promise<string> {
-    const roleQuestions: Record<string, string[]> = {
-      FRONTEND: [
-        "Explain how React's Virtual DOM and Reconciliation algorithm work under the hood. Specifically, how does the Diffing algorithm optimize render cycles?",
-        "How does the browser's Event Loop handle microtasks vs macrotasks when handling Promise resolutions and setTimeout callbacks?",
-        "Walk me through how you would architect state management and caching in a large-scale enterprise React web app."
-      ],
-      BACKEND: [
-        "Explain how database indexes (such as B-Trees) work internally and what happens to read/write latency when you over-index a table.",
-        "How would you design an idempotent payment processing API to ensure users aren't charged twice during network timeouts?",
-        "Compare Redis caching strategies: Cache-Aside vs Write-Through vs Write-Back. What are the trade-offs in consistency?"
-      ],
-      FULLSTACK: [
-        "Describe what happens from the moment a user enters a URL in their browser to the point where an interactive webpage is rendered, spanning DNS, TCP/TLS, HTTP, and DOM parsing.",
-        "How do you implement secure user authentication and authorization using JWT with refresh token rotation and CSRF protection?"
-      ],
-      SYSTEM_DESIGN: [
-        "Design a scalable URL shortening service (like Bitly) handling 100 million requests daily. Cover database choice, hashing collisions, and caching.",
-        "Design a distributed rate limiter for a multi-region microservices architecture."
-      ],
-      HR: [
-        "Tell me about a challenging technical roadblock or system outage you encountered. How did you diagnose the root cause, communicate with stakeholders, and resolve it?"
-      ]
-    };
+  // Extract project names or key claims from resume
+  extractResumeHighlights(resumeText: string): { projects: string[]; skills: string[] } {
+    const projects: string[] = [];
+    const skills: string[] = [];
 
-    const list = roleQuestions[roleType.toUpperCase()] || roleQuestions['FULLSTACK'];
-    return list[Math.floor(Math.random() * list.length)];
+    const lower = resumeText.toLowerCase();
+
+    // Detect common projects
+    if (lower.includes('e-commerce') || lower.includes('store') || lower.includes('cart')) {
+      projects.push('E-commerce Platform');
+    }
+    if (lower.includes('chat') || lower.includes('real-time') || lower.includes('messaging')) {
+      projects.push('Real-time Messaging Application');
+    }
+    if (lower.includes('flowdesk') || lower.includes('productivity') || lower.includes('workspace')) {
+      projects.push('FlowDesk Productivity OS');
+    }
+    if (lower.includes('rate limiter') || lower.includes('microservice')) {
+      projects.push('Distributed Rate Limiter Service');
+    }
+
+    const techDict = ['react', 'node', 'typescript', 'postgresql', 'redis', 'docker', 'mongodb', 'graphql', 'jwt', 'python', 'java'];
+    techDict.forEach(t => {
+      if (lower.includes(t)) skills.push(t);
+    });
+
+    return {
+      projects: projects.length > 0 ? projects : ['Full-Stack Web Architecture'],
+      skills: skills.length > 0 ? skills : ['React', 'Node.js', 'TypeScript', 'SQL']
+    };
   }
 
+  // Generates opening question customized to persona + candidate resume
+  async getInitialQuestion(
+    roleType: string,
+    persona: InterviewerPersona = 'ALEX',
+    resumeText: string = '',
+    customTopic?: string
+  ): Promise<string> {
+    const personaConfig = PERSONA_CONFIGS[persona] || PERSONA_CONFIGS.ALEX;
+    const highlights = this.extractResumeHighlights(resumeText);
+    const topProject = highlights.projects[0] || 'your core technical project';
+
+    const prompt = `
+Role: ${roleType}
+Interviewer Persona: ${personaConfig.name} (${personaConfig.tagline})
+Tone guidance: ${personaConfig.tonePrompt}
+Candidate Project from Resume: "${topProject}"
+Candidate Skills: ${highlights.skills.join(', ')}
+
+Craft a personalized, realistic opening interview question.
+It should welcome the candidate briefly in your persona's distinctive tone, then immediately ask them to dive into the technical architecture and challenges of "${topProject}" or a core ${roleType} architectural concept.
+
+Return ONLY the spoken question text (no quotes, no markdown).
+`;
+
+    const res = await llm.complete(prompt, personaConfig.tonePrompt);
+    if (res && res.trim().length > 20) {
+      return res.replace(/^["']|["']$/g, '').trim();
+    }
+
+    // Persona-specific deterministic opening fallbacks
+    if (persona === 'DANIEL') {
+      return `Welcome. I see on your resume that you built a ${topProject}. Walk me through the end-to-end architecture, and specifically explain how you handled state consistency and edge cases under high load.`;
+    }
+    if (persona === 'MAYA') {
+      return `Hi there, let's jump right in. Looking at your profile, you led development on ${topProject}. In two minutes, outline your key architectural decisions and why you selected your backend and database stack.`;
+    }
+    return `Hello! Good to meet you today. I noticed you highlighted ${topProject} on your profile. Could you give me an overview of the architecture and walk me through the most interesting technical challenge you solved while building it?`;
+  }
+
+  // Evaluates turn, updates memory claims, and triggers dynamic callbacks
   async evaluateTurn(
     roleType: string,
+    persona: InterviewerPersona,
     question: string,
     candidateAnswer: string,
-    turnCount: number
+    turnCount: number,
+    existingMemory: { claims?: string[]; callbacksDone?: string[] } = {}
   ): Promise<TurnEvaluation> {
+    const personaConfig = PERSONA_CONFIGS[persona] || PERSONA_CONFIGS.ALEX;
+
+    // Detect technical keywords mentioned by candidate to add to memory
+    const techRegex = /\b(jwt|session|redis|kafka|docker|kubernetes|postgres|postgresql|mongodb|react|redux|zustand|nextjs|rest|graphql|websocket|fiber|reconciliation|index|btree|oauth|tailwind)\b/gi;
+    const matches = Array.from(new Set((candidateAnswer.match(techRegex) || []).map(m => m.toLowerCase())));
+
+    const previousClaims = existingMemory.claims || [];
+    const updatedClaims = Array.from(new Set([...previousClaims, ...matches]));
+
+    // Check if we should perform a dynamic memory callback
+    let shouldCallback = false;
+    let callbackTarget = '';
+
+    if (turnCount >= 3 && updatedClaims.length > 0 && !(existingMemory.callbacksDone?.length)) {
+      // Pick a claim from earlier that hasn't been probed
+      callbackTarget = updatedClaims[0];
+      shouldCallback = true;
+    }
+
     const prompt = `
+Interviewer Persona: ${personaConfig.name} (${personaConfig.tagline})
+Interviewer Tone: ${personaConfig.tonePrompt}
 Role: ${roleType}
 Interviewer Question: "${question}"
 Candidate Answer: "${candidateAnswer}"
+Previous Claims in Memory: ${JSON.stringify(previousClaims)}
+${shouldCallback ? `TRIGGER CALLBACK: The candidate previously claimed to use "${callbackTarget}". Formulate a follow-up asking why they chose "${callbackTarget}" over common alternatives and what the architectural trade-off was.` : ''}
 
-Analyze this answer. Provide:
-1. Constructive critique (max 2 sentences, pinpointing technical accuracy or omissions).
-2. Score (0-100).
-3. If the answer was vague or incomplete, formulate a sharp, direct technical follow-up. Otherwise, introduce the next relevant technical question.
-
-Output strict JSON:
+Evaluate this answer in strict JSON:
 {
-  "critique": "You correctly identified...",
-  "score": 75,
-  "followUpOrNextQuestion": "Can you explain specifically how...",
-  "isFollowUp": true
+  "critique": "Constructive 1-2 sentence assessment in ${personaConfig.name}'s voice...",
+  "score": 82,
+  "followUpOrNextQuestion": "${personaConfig.name}'s next question or follow-up...",
+  "isCallback": ${shouldCallback}
 }
 `;
 
-    const res = await llm.complete(prompt, "You are a Principal Software Engineer conducting a high-bar technical interview. Return raw JSON.");
+    const res = await llm.complete(prompt, personaConfig.tonePrompt);
     if (res) {
       try {
         const cleaned = res.replace(/```json/g, '').replace(/```/g, '').trim();
-        return JSON.parse(cleaned);
+        const parsed = JSON.parse(cleaned);
+        return {
+          ...parsed,
+          extractedClaims: matches
+        };
       } catch (e) {}
     }
 
-    // Fallback logic if LLM is offline
-    const length = candidateAnswer.trim().split(/\s+/).length;
-    let score = 70;
-    let isFollowUp = false;
-    let critique = "Good conceptual direction, but could benefit from deeper architectural justification.";
-    let nextQ = "";
+    // High quality deterministic persona evaluation fallback
+    const wordCount = candidateAnswer.trim().split(/\s+/).length;
+    let score = 75;
+    let critique = '';
+    let nextQuestion = '';
 
-    if (length < 20) {
-      score = 55;
-      isFollowUp = true;
-      critique = "The explanation is brief and misses crucial underlying mechanics.";
-      nextQ = `You mentioned the high-level concept, but how does this behave under edge cases or high concurrency?`;
-    } else if (candidateAnswer.toLowerCase().includes("reconciliation") || candidateAnswer.toLowerCase().includes("index") || candidateAnswer.toLowerCase().includes("latency")) {
-      score = 85;
-      critique = "Strong explanation referencing core technical terms and practical trade-offs.";
-      nextQ = `Excellent. Now shifting to system reliability: how would you monitor and trace performance bottlenecks in this implementation?`;
+    if (shouldCallback && callbackTarget) {
+      score = 80;
+      critique = `Good explanation. Now following up on your earlier claim regarding ${callbackTarget.toUpperCase()}.`;
+      nextQuestion = `You mentioned using ${callbackTarget.toUpperCase()} earlier. Why did you select ${callbackTarget.toUpperCase()} over standard alternatives for this use case, and what architectural trade-offs did you make?`;
+    } else if (wordCount < 25) {
+      score = persona === 'DANIEL' ? 50 : 60;
+      critique = persona === 'DANIEL'
+        ? "Your explanation is too superficial and avoids the technical trade-offs. I need specific mechanics."
+        : "You touched on the surface concept, but let's dive into the actual implementation details.";
+      nextQuestion = persona === 'DANIEL'
+        ? `What happens when this fails in production? Walk me through your error boundaries and recovery strategy.`
+        : `Could you walk me through the step-by-step data flow when this runs in the browser?`;
     } else {
-      score = 75;
-      critique = "Solid answer covering the primary points. Expanding on trade-offs would elevate the response.";
-      nextQ = `Let's dive into practical implementation: what design patterns would you apply to keep this code testable and decoupled?`;
+      score = persona === 'DANIEL' ? 82 : 88;
+      critique = persona === 'MAYA'
+        ? "Clear and structured response covering the main points. Let's look at performance optimization."
+        : "Strong technical breakdown with good conceptual clarity.";
+      nextQuestion = `How would you profile and optimize this implementation if request volume grew by 10x?`;
     }
 
-    return { critique, score, followUpOrNextQuestion: nextQ, isFollowUp };
+    return {
+      critique,
+      score,
+      followUpOrNextQuestion: nextQuestion,
+      isCallback: shouldCallback,
+      extractedClaims: matches
+    };
   }
 
+  // Finalizes interview with 5-axis rubric scorecard and coaching advice
   async finalizeInterview(
     roleType: string,
-    history: Array<{ question: string; answer: string; score?: number }>
+    persona: InterviewerPersona,
+    history: Array<{ question: string; answer: string; score?: number }>,
+    memoryClaims: string[] = []
   ): Promise<FinalInterviewEvaluation> {
-    const prompt = `
-Review this mock interview transcript for a ${roleType} role:
-${JSON.stringify(history, null, 2)}
+    const personaConfig = PERSONA_CONFIGS[persona] || PERSONA_CONFIGS.ALEX;
 
-Provide a strict JSON evaluation:
+    const prompt = `
+Interviewer: ${personaConfig.name} (${personaConfig.tagline})
+Role: ${roleType}
+Candidate Transcript:
+${JSON.stringify(history, null, 2)}
+Technical Claims Made: ${memoryClaims.join(', ')}
+
+Synthesize a comprehensive 5-axis hiring evaluation.
+Return strict JSON:
 {
-  "overallScore": 78,
+  "overallScore": 81,
   "scores": {
-    "technical": 80,
-    "communication": 75,
-    "problemSolving": 82,
-    "confidence": 72
+    "technical": 84,
+    "communication": 76,
+    "problemSolving": 88,
+    "relevance": 82,
+    "confidence": 75
   },
-  "feedbackSummary": "Candidate showed strong foundational knowledge...",
-  "weakAreas": ["React Reconciliation", "SQL Indexing", "REST Status Codes"],
+  "feedbackSummary": "Candidate demonstrated strong engineering grasp...",
+  "coachingAdvice": "Practice framing technical explanations using the Situation -> Approach -> Result framework to ensure answers stay concise.",
+  "strongAreas": ["Problem Solving", "REST API Design", "Database Query Optimization"],
+  "weakAreas": ["React Reconciliation Diffing", "Concise Answer Structuring", "Redis Cache Invalidation"],
   "remediationTasks": [
     {
-      "title": "Study React Reconciliation & Fiber Architecture",
+      "title": "Study React Reconciliation & Fiber Diffing Heuristics",
       "estimatedMin": 45,
       "priority": "HIGH",
       "tag": "React"
     },
     {
-      "title": "Practice B-Tree Index analysis in PostgreSQL",
+      "title": "Practice Cache-Aside & Write-Through Invalidation in Redis",
       "estimatedMin": 60,
       "priority": "HIGH",
-      "tag": "Database"
+      "tag": "Backend"
     }
   ]
 }
 `;
 
-    const res = await llm.complete(prompt, "You are an Elite Technical Hiring Committee Chair. Return raw JSON.");
+    const res = await llm.complete(prompt, "You are a Principal Engineer and Hiring Committee Chair. Return raw JSON.");
     if (res) {
       try {
         const cleaned = res.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -159,28 +290,33 @@ Provide a strict JSON evaluation:
 
     // High quality deterministic fallback
     const avgScore = history.length > 0
-      ? Math.round(history.reduce((acc, h) => acc + (h.score || 72), 0) / history.length)
-      : 76;
+      ? Math.round(history.reduce((sum, h) => sum + (h.score || 75), 0) / history.length)
+      : 78;
+
+    const strongAreas = roleType === 'FRONTEND'
+      ? ['Frontend State Management', 'Component Composition', 'Web Performance Optimization']
+      : ['Database Query Optimization', 'API Idempotency', 'Distributed Systems'];
 
     const weakAreas = roleType === 'FRONTEND'
-      ? ['React Virtual DOM Diffing', 'Event Loop Microtasks', 'State Immutability Patterns']
-      : roleType === 'BACKEND'
-      ? ['Database B-Tree Indexing', 'API Idempotency Keys', 'Cache Invalidation']
-      : ['System Scalability Bottlenecks', 'Asynchronous Queue Processing', 'REST API Error Semantics'];
+      ? ['React Reconciliation Diffing', 'Event Loop Microtask Priority', 'Concise Answer Structuring']
+      : ['Redis Cache Invalidation', 'SQL Index B-Tree Mechanics', 'System Scalability Trade-offs'];
 
     return {
       overallScore: avgScore,
       scores: {
-        technical: Math.min(95, avgScore + 2),
-        communication: Math.max(60, avgScore - 4),
+        technical: Math.min(95, avgScore + 3),
+        communication: Math.max(65, avgScore - 4),
         problemSolving: Math.min(92, avgScore + 5),
-        confidence: Math.max(65, avgScore - 2),
+        relevance: Math.min(90, avgScore + 1),
+        confidence: Math.max(68, avgScore - 2)
       },
-      feedbackSummary: `Candidate demonstrated solid core competency for ${roleType} roles with clear articulation on main concepts. Continued refinement on deep internal mechanics and trade-off comparisons will elevate the profile to senior tier.`,
+      feedbackSummary: `Candidate demonstrated solid core competency for ${roleType} roles with clear technical foundations. When challenged by ${personaConfig.name} on deep internals and edge cases, the candidate maintained good composure while highlighting areas for deeper mechanical precision.`,
+      coachingAdvice: `You performed well technically, but several answers were longer than necessary. Practice answering technical questions using a Situation → Approach → Result structure to keep explanations crisp and high-signal.`,
+      strongAreas,
       weakAreas,
-      remediationTasks: weakAreas.map(area => ({
-        title: `Deep-Dive Revision: ${area}`,
-        estimatedMin: 50,
+      remediationTasks: weakAreas.map(w => ({
+        title: `Remediation Drill: ${w}`,
+        estimatedMin: 45,
         priority: 'HIGH' as const,
         tag: 'MockRemediation'
       }))

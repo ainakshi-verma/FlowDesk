@@ -118,7 +118,7 @@ export class ApiService {
     return this.request<any[]>(`/workspaces/${workspaceId}/interviews`);
   }
 
-  async startInterview(workspaceId: string, data: { roleType: string; title?: string }) {
+  async startInterview(workspaceId: string, data: { roleType: string; persona?: string; title?: string; jobId?: string }) {
     return this.request<any>(`/workspaces/${workspaceId}/interviews/start`, {
       method: 'POST',
       body: JSON.stringify(data)
@@ -134,6 +134,12 @@ export class ApiService {
 
   async completeInterview(interviewId: string) {
     return this.request<any>(`/interviews/${interviewId}/complete`, {
+      method: 'POST'
+    });
+  }
+
+  async practiceWeakAreas(interviewId: string) {
+    return this.request<any>(`/interviews/${interviewId}/practice-weak-areas`, {
       method: 'POST'
     });
   }

@@ -56,29 +56,37 @@ export interface JobApplication {
   };
 }
 
+export interface InterviewExchange {
+  id: string;
+  turnOrder: number;
+  speaker: 'INTERVIEWER' | 'CANDIDATE';
+  message: string;
+  critique?: string;
+  score?: number;
+  isCallback?: boolean;
+}
+
 export interface InterviewSession {
   id: string;
   workspaceId: string;
   title: string;
   roleType: 'FRONTEND' | 'BACKEND' | 'FULLSTACK' | 'SYSTEM_DESIGN' | 'HR';
+  persona?: 'ALEX' | 'MAYA' | 'DANIEL';
   status: 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED';
   overallScore?: number;
   scores?: {
     technical: number;
     communication: number;
     problemSolving: number;
+    relevance?: number;
     confidence: number;
   };
   feedbackSummary?: string;
+  coachingAdvice?: string;
+  strongAreas?: string[];
   weakAreas: string[];
-  exchanges: Array<{
-    id: string;
-    turnOrder: number;
-    speaker: 'INTERVIEWER' | 'CANDIDATE';
-    message: string;
-    critique?: string;
-    score?: number;
-  }>;
+  targetJobTitle?: string;
+  exchanges: InterviewExchange[];
 }
 
 export interface DocumentItem {
