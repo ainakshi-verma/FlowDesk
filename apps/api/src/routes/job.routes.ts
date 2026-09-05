@@ -136,7 +136,7 @@ router.post('/jobs/:id/generate-tasks', async (req: AuthenticatedRequest, res: R
     const analysis = JSON.parse(job.analysis);
     const actionPlan: Array<{ title: string; estimatedMin: number; priority: string; reason: string }> = analysis.actionPlan || [];
 
-    const createdTasks = [];
+    const createdTasks : any[] = [];
     for (const plan of actionPlan) {
       const task = await prisma.task.create({
         data: {

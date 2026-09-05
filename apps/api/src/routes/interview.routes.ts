@@ -259,7 +259,7 @@ router.post('/interviews/:id/complete', async (req: AuthenticatedRequest, res: R
     });
 
     // Automatically spawn remediation tasks on Workspace Kanban board!
-    const generatedTasks = [];
+    const generatedTasks : any[] = [];
     for (const task of evaluation.remediationTasks) {
       const created = await prisma.task.create({
         data: {
